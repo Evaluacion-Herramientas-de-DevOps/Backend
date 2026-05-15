@@ -2,7 +2,7 @@ name: Deploy Backend Ventas
 
 on:
   push:
-    branches: [ "deploy" ] # Se activa solo en la rama deploy
+    branches: [ "deploy" ]
 
 jobs:
   build-and-push:
@@ -11,16 +11,26 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Login to Docker Hub
-        uses: docker/login-action@v2
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
 
       - name: Build and Push Docker image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: microservicio_de_ventas # Nombre exacto que me diste
         run: |
-          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/back-ventas:latest ./back-Ventas_SpringBoot
-          docker push ${{ secrets.DOCKERHUB_USERNAME }}/back-ventas:latest
+          # Construye usando la subcarpeta correcta del microservicio
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:latest ./back-Ventas_SpringBoot/Springboot-API-REST-VENTA
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
   deploy:
     needs: build-and-push
@@ -29,11 +39,15 @@ jobs:
       - name: Deploy to EC2 via SSH
         uses: appleboy/ssh-action@master
         with:
-          host: ${{ secrets.EC2_HOST }}
+          host: ${{ secrets.EC2_HOST }} # IP de tu instancia de Backend
           username: ec2-user
-          key: ${{ secrets.EC2_SSH_KEY }}
+          key: ${{ secrets.EC2_SSH_KEY }} # La llave que pegarás en los secretos
           script: |
-            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/back-ventas:latest
+            # Login en ECR dentro de la instancia
+            aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }}
+            
+            # Limpiar y ejecutar el nuevo contenedor
+            docker pull ${{ secrets.ECR_REGISTRY }}/microservicio_de_ventas:latest
             docker stop back-ventas || true
             docker rm back-ventas || true
-            docker run -d --name back-ventas -p 8081:8080 ${{ secrets.DOCKERHUB_USERNAME }}/back-ventas:latest
+            docker run -d --name back-ventas -p 8081:8080 ${{ secrets.ECR_REGISTRY }}/microservicio_de_ventas:latest
