@@ -9,10 +9,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -21,15 +21,15 @@ jobs:
 
       - name: Login to Amazon ECR
         id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v1
+        uses: aws-actions/amazon-ecr-login@v2
 
       - name: Build and Push Docker image
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: microservicio_de_ventas # Nombre exacto que me diste
+          ECR_REPOSITORY: microservicio_de_ventas
         run: |
-          # Construye usando la subcarpeta correcta del microservicio
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:latest ./back-Ventas_SpringBoot/Springboot-API-REST-VENTA
+          # Construcción usando la ruta exacta: ./back-Ventas_SpringBoot/Springboot-API-REST
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:latest ./back-Ventas_SpringBoot/Springboot-API-REST
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
   deploy:
@@ -39,15 +39,19 @@ jobs:
       - name: Deploy to EC2 via SSH
         uses: appleboy/ssh-action@master
         with:
-          host: ${{ secrets.EC2_HOST }} # IP de tu instancia de Backend
+          host: ${{ secrets.EC2_HOST }}
           username: ec2-user
-          key: ${{ secrets.EC2_SSH_KEY }} # La llave que pegarás en los secretos
+          key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            # Login en ECR dentro de la instancia
+            # Login en ECR dentro de la instancia EC2
             aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }}
             
-            # Limpiar y ejecutar el nuevo contenedor
+            # Descargar la imagen actualizada
             docker pull ${{ secrets.ECR_REGISTRY }}/microservicio_de_ventas:latest
+            
+            # Detener y limpiar contenedor anterior si existe
             docker stop back-ventas || true
             docker rm back-ventas || true
+            
+            # Ejecutar el nuevo contenedor en el puerto 8081
             docker run -d --name back-ventas -p 8081:8080 ${{ secrets.ECR_REGISTRY }}/microservicio_de_ventas:latest
