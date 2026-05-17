@@ -52,15 +52,15 @@ jobs:
             # 2. Obtener dinámicamente el URL del Registry de ECR
             ECR_REGISTRY=$(aws sts get-caller-identity --query "Account" --output text).dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
 
-            # 3. Autenticar Docker con Amazon ECR dentro de la instancia EC2
-            aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | docker login --username AWS --password-stdin $ECR_REGISTRY
+            # 3. Autenticar Docker con Amazon ECR dentro de la instancia EC2 usando sudo
+            aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | sudo docker login --username AWS --password-stdin $ECR_REGISTRY
            
-            # 4. Descargar la imagen actualizada
-            docker pull $ECR_REGISTRY/microservicio_de_ventas:latest
+            # 4. Descargar la imagen actualizada usando sudo
+            sudo docker pull $ECR_REGISTRY/microservicio_de_ventas:latest
            
-            # 5. Detener y limpiar contenedor anterior si existe
-            docker stop back-ventas || true
-            docker rm back-ventas || true
+            # 5. Detener y limpiar contenedor anterior si existe usando sudo
+            sudo docker stop back-ventas || true
+            sudo docker rm back-ventas || true
            
-            # 6. Ejecutar el nuevo contenedor en el puerto 8081
-            docker run -d --name back-ventas -p 8081:8080 $ECR_REGISTRY/microservicio_de_ventas:latest
+            # 6. Ejecutar el nuevo contenedor en el puerto 8081 usando sudo
+            sudo docker run -d --name back-ventas -p 8081:8080 $ECR_REGISTRY/microservicio_de_ventas:latest
