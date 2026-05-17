@@ -26,7 +26,7 @@ jobs:
       - name: Build and Push Docker image
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: microservicio_de_despacho # Nombre exacto que me diste
+          ECR_REPOSITORY: microservicio_de_despacho
         run: |
           # Construye usando la subcarpeta correcta del microservicio
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:latest ./back-Despachos_SpringBoot/Springboot-API-REST-DESPACHO
@@ -43,10 +43,24 @@ jobs:
           username: ec2-user
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }}
-            
-            docker pull ${{ secrets.ECR_REGISTRY }}/microservicio_de_despacho:latest
+            # 1. Configurar variables temporales de AWS directamente en la sesión SSH
+            export AWS_ACCESS_KEY_ID="${{ secrets.AWS_ACCESS_KEY_ID }}"
+            export AWS_SECRET_ACCESS_KEY="${{ secrets.AWS_SECRET_ACCESS_KEY }}"
+            export AWS_SESSION_TOKEN="${{ secrets.AWS_SESSION_TOKEN }}"
+            export AWS_DEFAULT_REGION="${{ secrets.AWS_REGION }}"
+
+            # 2. Obtener dinámicamente el URL del Registry de ECR
+            ECR_REGISTRY=$(aws sts get-caller-identity --query "Account" --output text).dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
+
+            # 3. Autenticar Docker con Amazon ECR
+            aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | docker login --username AWS --password-stdin $ECR_REGISTRY
+           
+            # 4. Descargar la última imagen construida
+            docker pull $ECR_REGISTRY/microservicio_de_despacho:latest
+
+            # 5. Limpieza preventiva (Evita atascos si el contenedor ya existía)
             docker stop back-despachos || true
             docker rm back-despachos || true
-            # He quitado la red 'app-network' para evitar errores si no está creada; Docker usará la default
-            docker run -d --name back-despachos -p 8082:8080 ${{ secrets.ECR_REGISTRY }}/microservicio_de_despacho:latest
+            
+            # 6. Levantar el contenedor en el puerto 8082
+            docker run -d --name back-despachos -p 8082:8080 $ECR_REGISTRY/microservicio_de_despacho:latest
