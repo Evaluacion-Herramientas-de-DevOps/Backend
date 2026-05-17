@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  # Base de Datos para el microservicio de Ventas
+  # Base de Datos para Ventas
   db-ventas:
     image: mysql:8.0
     container_name: db-ventas
@@ -10,11 +10,11 @@ services:
       MYSQL_DATABASE: db_ventas
       MYSQL_ROOT_PASSWORD: root
     volumes:
-      - v_ventas_data:/var/lib/mysql # Persistencia (IE2)
+      - v_ventas_data:/var/lib/mysql # Persistencia de datos requerida por la rúbrica
     networks:
       - innova-network
 
-  # Base de Datos para el microservicio de Despachos
+  # Base de Datos para Despachos
   db-despachos:
     image: mysql:8.0
     container_name: db-despachos
@@ -23,40 +23,50 @@ services:
       MYSQL_DATABASE: db_despacho
       MYSQL_ROOT_PASSWORD: root
     volumes:
-      - v_despacho_data:/var/lib/mysql # Persistencia (IE2)
+      - v_despacho_data:/var/lib/mysql # Persistencia de datos requerida por la rúbrica
     networks:
       - innova-network
 
-  # Microservicio Ventas
+  # Microservicio Ventas (Spring Boot)
   back-ventas:
-    build: 
-      context: ./back-Ventas_SpringBoot
-      dockerfile: Dockerfile
+    image: ${ECR_REGISTRY}/microservicio_de_ventas:latest
     container_name: back-ventas
+    restart: always
     ports:
       - "8081:8080"
     depends_on:
       - db-ventas
+    environment:
+      - DB_ENDPOINT=db-ventas
+      - DB_PORT=3306
+      - DB_NAME=db_ventas
+      - DB_USERNAME=root
+      - DB_PASSWORD=root
     networks:
       - innova-network
 
-  # Microservicio Despachos
+  # Microservicio Despachos (Spring Boot)
   back-despachos:
-    build:
-      context: ./back-Despachos_SpringBoot
-      dockerfile: Dockerfile
+    image: ${ECR_REGISTRY}/microservicio_de_despacho:latest
     container_name: back-despachos
+    restart: always
     ports:
       - "8082:8080"
     depends_on:
       - db-despachos
+    environment:
+      - DB_ENDPOINT=db-despachos
+      - DB_PORT=3306
+      - DB_NAME=db_despacho
+      - DB_USERNAME=root
+      - DB_PASSWORD=root
     networks:
       - innova-network
 
 networks:
   innova-network:
-    driver: bridge # Red interna para comunicación entre contenedores (IE6)
+    driver: bridge # Red aislada para cumplir seguridad del examen
 
 volumes:
-  v_ventas_data: # Definición de volúmenes nombrados (IE2)
+  v_ventas_data:
   v_despacho_data:

@@ -25,43 +25,37 @@ jobs:
 
       - name: Build and Push Docker image
         env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: microservicio_de_ventas
+          ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
         run: |
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:latest ./back-Ventas_SpringBoot/Springboot-API-REST
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          # Construye la imagen usando tu secreto ECR_REGISTRY exacto
+          docker build -t $ECR_REGISTRY/microservicio_de_ventas:latest ./back-Ventas_SpringBoot/Springboot-API-REST
+          docker push $ECR_REGISTRY/microservicio_de_ventas:latest
 
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy to Private Backend via Frontend Bastion
+      - name: Deploy to Private Backend via SSH Tunnel
         uses: appleboy/ssh-action@master
         with:
-          host: ${{ secrets.EC2_HOST }} # IP Pública del Frontend (Actúa como puente)
+          host: ${{ secrets.EC2_HOST }} # Usa tu secreto EC2_HOST (IP Pública Frontend)
           username: ec2-user
-          key: ${{ secrets.EC2_SSH_KEY }}
+          key: ${{ secrets.EC2_SSH_KEY }} # Usa tu secreto EC2_SSH_KEY
           script: |
-            # 1. IP PRIVADA DEL BACKEND INTEGRADA
             BACKEND_IP="10.0.141.155"
+            
+            # 1. Crear temporalmente la llave en el Frontend para saltar al Backend
+            echo "${{ secrets.EC2_SSH_KEY }}" > private_key.pem
+            chmod 400 private_key.pem
 
-            # 2. Configurar credenciales de AWS temporales en el Bastión
-            export AWS_ACCESS_KEY_ID="${{ secrets.AWS_ACCESS_KEY_ID }}"
-            export AWS_SECRET_ACCESS_KEY="${{ secrets.AWS_SECRET_ACCESS_KEY }}"
-            export AWS_SESSION_TOKEN="${{ secrets.AWS_SESSION_TOKEN }}"
-            export AWS_DEFAULT_REGION="${{ secrets.AWS_REGION }}"
+            # 2. Conectarse al Backend para autenticarlo con ECR y preparar la carpeta
+            ssh -o StrictHostKeyChecking=no -i private_key.pem ec2-user@$BACKEND_IP << 'EOF'
+              aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }}
+              mkdir -p ~/app-backend
+            EOF
 
-            # 3. Obtener la URL del Registry de ECR
-            ECR_REGISTRY=$(aws sts get-caller-identity --query "Account" --output text).dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
-
-            # 4. Autenticar Docker con ECR en el Backend Privado de forma remota
-            aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | sudo docker -H tcp://$BACKEND_IP:2375 login --username AWS --password-stdin $ECR_REGISTRY
-           
-            # 5. Descargar la nueva imagen de Ventas en la máquina privada
-            sudo docker -H tcp://$BACKEND_IP:2375 pull $ECR_REGISTRY/microservicio_de_ventas:latest
-
-            # 6. Crear dinámicamente el archivo docker-compose.yml corregido para AWS
-            cat << 'EOF' > docker-compose-backend.yml
+            # 3. Escribir el archivo docker-compose.yml de manera remota dentro del Backend privado
+            ssh -o StrictHostKeyChecking=no -i private_key.pem ec2-user@$BACKEND_IP "cat << 'INNER_EOF' > ~/app-backend/docker-compose.yml
             version: '3.8'
             services:
               db-ventas:
@@ -89,10 +83,10 @@ jobs:
                   - innova-network
 
               back-ventas:
-                image: ${ECR_REGISTRY}/microservicio_de_ventas:latest
+                image: ${{ secrets.ECR_REGISTRY }}/microservicio_de_ventas:latest
                 container_name: back-ventas
                 ports:
-                  - "8081:8080"
+                  - '8081:8080'
                 depends_on:
                   - db-ventas
                 environment:
@@ -105,10 +99,10 @@ jobs:
                   - innova-network
 
               back-despachos:
-                image: ${ECR_REGISTRY}/microservicio_de_despacho:latest
+                image: ${{ secrets.ECR_REGISTRY }}/microservicio_de_despacho:latest
                 container_name: back-despachos
                 ports:
-                  - "8082:8080"
+                  - '8082:8080'
                 depends_on:
                   - db-despachos
                 environment:
@@ -127,13 +121,11 @@ jobs:
             volumes:
               v_ventas_data:
               v_despacho_data:
-            EOF
+            INNER_EOF
+            "
 
-            # Reemplazar la variable intermedia de bash dentro del archivo generado
-            sed -i "s|\${ECR_REGISTRY}|$ECR_REGISTRY|g" docker-compose-backend.yml
+            # 4. Descargar imágenes actualizadas y levantar el ecosistema completo
+            ssh -o StrictHostKeyChecking=no -i private_key.pem ec2-user@$BACKEND_IP "cd ~/app-backend && docker compose pull && docker compose up -d"
 
-            # 7. Ejecutar u optimizar de manera remota apuntando al Backend Privado
-            sudo docker -H tcp://$BACKEND_IP:2375 compose -f docker-compose-backend.yml up -d
-
-            # Limpieza del archivo temporal en el Frontend
-            rm docker-compose-backend.yml
+            # 5. Limpiar la llave del puente por seguridad
+            rm -f private_key.pem
