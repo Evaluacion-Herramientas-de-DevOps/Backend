@@ -28,7 +28,6 @@ jobs:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           ECR_REPOSITORY: microservicio_de_ventas
         run: |
-          # Construcción usando la ruta exacta: ./back-Ventas_SpringBoot/Springboot-API-REST
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:latest ./back-Ventas_SpringBoot/Springboot-API-REST
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
@@ -43,27 +42,98 @@ jobs:
           username: ec2-user
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            # 1. IP PRIVADA DE TU BACKEND (¡REEMPLAZA ESTA IP POR LA REAL DE TU INSTANCIA BACKEND!)
-            BACKEND_IP=10.0.141.155
+            # 1. IP PRIVADA DEL BACKEND INTEGRADA
+            BACKEND_IP="10.0.141.155"
 
-            # 2. Configurar credenciales de AWS temporales en la sesión del Frontend
+            # 2. Configurar credenciales de AWS temporales en el Bastión
             export AWS_ACCESS_KEY_ID="${{ secrets.AWS_ACCESS_KEY_ID }}"
             export AWS_SECRET_ACCESS_KEY="${{ secrets.AWS_SECRET_ACCESS_KEY }}"
             export AWS_SESSION_TOKEN="${{ secrets.AWS_SESSION_TOKEN }}"
             export AWS_DEFAULT_REGION="${{ secrets.AWS_REGION }}"
 
-            # 3. Obtener dinámicamente el URL del Registry de ECR
+            # 3. Obtener la URL del Registry de ECR
             ECR_REGISTRY=$(aws sts get-caller-identity --query "Account" --output text).dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
 
-            # 4. Iniciar sesión en ECR apuntando remotamente al Docker del Backend Privado
+            # 4. Autenticar Docker con ECR en el Backend Privado de forma remota
             aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | sudo docker -H tcp://$BACKEND_IP:2375 login --username AWS --password-stdin $ECR_REGISTRY
            
-            # 5. Descargar la imagen directo en el Backend Privado de forma remota
+            # 5. Descargar la nueva imagen de Ventas en la máquina privada
             sudo docker -H tcp://$BACKEND_IP:2375 pull $ECR_REGISTRY/microservicio_de_ventas:latest
-           
-            # 6. Limpieza preventiva en el Backend Privado
-            sudo docker -H tcp://$BACKEND_IP:2375 stop back-ventas || true
-            sudo docker -H tcp://$BACKEND_IP:2375 rm back-ventas || true
-           
-            # 7. Ejecutar el nuevo contenedor en el puerto 8081 del Backend Privado
-            sudo docker -H tcp://$BACKEND_IP:2375 run -d --name back-ventas -p 8081:8080 $ECR_REGISTRY/microservicio_de_ventas:latest
+
+            # 6. Crear dinámicamente el archivo docker-compose.yml corregido para AWS
+            cat << 'EOF' > docker-compose-backend.yml
+            version: '3.8'
+            services:
+              db-ventas:
+                image: mysql:8.0
+                container_name: db-ventas
+                restart: always
+                environment:
+                  MYSQL_DATABASE: db_ventas
+                  MYSQL_ROOT_PASSWORD: root
+                volumes:
+                  - v_ventas_data:/var/lib/mysql
+                networks:
+                  - innova-network
+
+              db-despachos:
+                image: mysql:8.0
+                container_name: db-despachos
+                restart: always
+                environment:
+                  MYSQL_DATABASE: db_despacho
+                  MYSQL_ROOT_PASSWORD: root
+                volumes:
+                  - v_despacho_data:/var/lib/mysql
+                networks:
+                  - innova-network
+
+              back-ventas:
+                image: ${ECR_REGISTRY}/microservicio_de_ventas:latest
+                container_name: back-ventas
+                ports:
+                  - "8081:8080"
+                depends_on:
+                  - db-ventas
+                environment:
+                  - DB_ENDPOINT=db-ventas
+                  - DB_PORT=3306
+                  - DB_NAME=db_ventas
+                  - DB_USERNAME=root
+                  - DB_PASSWORD=root
+                networks:
+                  - innova-network
+
+              back-despachos:
+                image: ${ECR_REGISTRY}/microservicio_de_despacho:latest
+                container_name: back-despachos
+                ports:
+                  - "8082:8080"
+                depends_on:
+                  - db-despachos
+                environment:
+                  - DB_ENDPOINT=db-despachos
+                  - DB_PORT=3306
+                  - DB_NAME=db_despacho
+                  - DB_USERNAME=root
+                  - DB_PASSWORD=root
+                networks:
+                  - innova-network
+
+            networks:
+              innova-network:
+                driver: bridge
+
+            volumes:
+              v_ventas_data:
+              v_despacho_data:
+            EOF
+
+            # Reemplazar la variable intermedia de bash dentro del archivo generado
+            sed -i "s|\${ECR_REGISTRY}|$ECR_REGISTRY|g" docker-compose-backend.yml
+
+            # 7. Ejecutar u optimizar de manera remota apuntando al Backend Privado
+            sudo docker -H tcp://$BACKEND_IP:2375 compose -f docker-compose-backend.yml up -d
+
+            # Limpieza del archivo temporal en el Frontend
+            rm docker-compose-backend.yml
