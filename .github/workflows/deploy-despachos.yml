@@ -44,7 +44,7 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             # 1. IP PRIVADA DE TU BACKEND (¡REEMPLAZA ESTA IP POR LA REAL DE TU INSTANCIA BACKEND!)
-            BACKEND_IP="10.0.X.X"
+            BACKEND_IP=10.0.141.155
 
             # 2. Configurar credenciales de AWS temporales en la sesión del Frontend
             export AWS_ACCESS_KEY_ID="${{ secrets.AWS_ACCESS_KEY_ID }}"
