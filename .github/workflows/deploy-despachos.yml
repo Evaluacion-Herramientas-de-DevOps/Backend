@@ -52,15 +52,15 @@ jobs:
             # 2. Obtener dinámicamente el URL del Registry de ECR
             ECR_REGISTRY=$(aws sts get-caller-identity --query "Account" --output text).dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
 
-            # 3. Autenticar Docker con Amazon ECR
-            aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | docker login --username AWS --password-stdin $ECR_REGISTRY
+            # 3. Autenticar Docker con Amazon ECR usando sudo
+            aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | sudo docker login --username AWS --password-stdin $ECR_REGISTRY
            
-            # 4. Descargar la última imagen construida
-            docker pull $ECR_REGISTRY/microservicio_de_despacho:latest
+            # 4. Descargar la última imagen construida usando sudo
+            sudo docker pull $ECR_REGISTRY/microservicio_de_despacho:latest
 
-            # 5. Limpieza preventiva (Evita atascos si el contenedor ya existía)
-            docker stop back-despachos || true
-            docker rm back-despachos || true
+            # 5. Limpieza preventiva usando sudo (Evita atascos si el contenedor ya existía)
+            sudo docker stop back-despachos || true
+            sudo docker rm back-despachos || true
             
-            # 6. Levantar el contenedor en el puerto 8082
-            docker run -d --name back-despachos -p 8082:8080 $ECR_REGISTRY/microservicio_de_despacho:latest
+            # 6. Levantar el contenedor en el puerto 8082 usando sudo
+            sudo docker run -d --name back-despachos -p 8082:8080 $ECR_REGISTRY/microservicio_de_despacho:latest
