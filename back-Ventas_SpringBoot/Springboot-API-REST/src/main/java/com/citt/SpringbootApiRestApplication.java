@@ -11,4 +11,4 @@ public class SpringbootApiRestApplication {
 	}
 }
 
-//comentario ventas
+//comentario venta
