@@ -36,31 +36,34 @@ jobs:
     needs: build-and-push
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy to EC2 via SSH
+      - name: Deploy to Private Backend via Frontend Bastion
         uses: appleboy/ssh-action@master
         with:
-          host: ${{ secrets.EC2_HOST }}
+          host: ${{ secrets.EC2_HOST }} # IP Pública del Frontend (Actúa como puente)
           username: ec2-user
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            # 1. Configurar variables temporales de AWS directamente en la sesión SSH
+            # 1. IP PRIVADA DE TU BACKEND (¡REEMPLAZA ESTA IP POR LA REAL DE TU INSTANCIA BACKEND!)
+            BACKEND_IP="10.0.X.X"
+
+            # 2. Configurar credenciales de AWS temporales en la sesión del Frontend
             export AWS_ACCESS_KEY_ID="${{ secrets.AWS_ACCESS_KEY_ID }}"
             export AWS_SECRET_ACCESS_KEY="${{ secrets.AWS_SECRET_ACCESS_KEY }}"
             export AWS_SESSION_TOKEN="${{ secrets.AWS_SESSION_TOKEN }}"
             export AWS_DEFAULT_REGION="${{ secrets.AWS_REGION }}"
 
-            # 2. Obtener dinámicamente el URL del Registry de ECR
+            # 3. Obtener dinámicamente el URL del Registry de ECR
             ECR_REGISTRY=$(aws sts get-caller-identity --query "Account" --output text).dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
 
-            # 3. Autenticar Docker con Amazon ECR dentro de la instancia EC2 usando sudo
-            aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | sudo docker login --username AWS --password-stdin $ECR_REGISTRY
+            # 4. Iniciar sesión en ECR apuntando remotamente al Docker del Backend Privado
+            aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | sudo docker -H tcp://$BACKEND_IP:2375 login --username AWS --password-stdin $ECR_REGISTRY
            
-            # 4. Descargar la imagen actualizada usando sudo
-            sudo docker pull $ECR_REGISTRY/microservicio_de_ventas:latest
+            # 5. Descargar la imagen directo en el Backend Privado de forma remota
+            sudo docker -H tcp://$BACKEND_IP:2375 pull $ECR_REGISTRY/microservicio_de_ventas:latest
            
-            # 5. Detener y limpiar contenedor anterior si existe usando sudo
-            sudo docker stop back-ventas || true
-            sudo docker rm back-ventas || true
+            # 6. Limpieza preventiva en el Backend Privado
+            sudo docker -H tcp://$BACKEND_IP:2375 stop back-ventas || true
+            sudo docker -H tcp://$BACKEND_IP:2375 rm back-ventas || true
            
-            # 6. Ejecutar el nuevo contenedor en el puerto 8081 usando sudo
-            sudo docker run -d --name back-ventas -p 8081:8080 $ECR_REGISTRY/microservicio_de_ventas:latest
+            # 7. Ejecutar el nuevo contenedor en el puerto 8081 del Backend Privado
+            sudo docker -H tcp://$BACKEND_IP:2375 run -d --name back-ventas -p 8081:8080 $ECR_REGISTRY/microservicio_de_ventas:latest
