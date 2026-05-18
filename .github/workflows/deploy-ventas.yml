@@ -42,7 +42,7 @@ jobs:
           username: ec2-user
           key: ${{ secrets.EC2_SSH_KEY }} # Usa tu secreto EC2_SSH_KEY
           script: |
-            BACKEND_IP="10.0.141.155"
+            BACKEND_IP="10.0.142.227"
             
             # 1. Crear temporalmente la llave en el Frontend para saltar al Backend
             echo "${{ secrets.EC2_SSH_KEY }}" > private_key.pem
